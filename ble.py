@@ -4,7 +4,7 @@ import time
 import usb
 
 from bleak import BleakScanner
-from ant.core import driver, node, message, constants
+from ant.core import driver, node, message, constants, resetUSB
 
 
 class PowerData:
@@ -26,6 +26,17 @@ class KeiserListener:
     def __init__(self, bike_id, scan_request) -> None:
         self.bike_id = bike_id & 0xFF
         self.scan_request = scan_request
+        self.version_major = 0
+        self.version_minor = 0
+        self.data_type = 0
+        self.cadence = 0
+        self.heart_rate = 0
+        self.power = 0
+        self.calories = 0
+        self.minutes = 0
+        self.seconds = 0
+        self.distance = 0
+        self.gear = 0
 
     def callback(self, device, advertisement_data):
         if device.name == "M3":
@@ -75,6 +86,8 @@ class AntPlusTx:
         devs = usb.core.find(find_all=True, idVendor=0x0FCF)
         for dev in devs:
             if dev.idProduct in [0x1008, 0x1009]:
+                resetUSB.reset_USB_Device()
+                time.sleep(1)
                 stick = driver.USB2Driver(
                     log=None,
                     debug=False,
@@ -134,35 +147,23 @@ class AntPlusTx:
         self.node.send(ant_msg)
 
 
-class WatchDog:
-    def __init__(self, timeout, signal):
-        self.timeout = timeout
-        self.last_update = time.time()
-        self.signal = signal
-
-    def feed(self):
-        self.last_update = time.time()
-
-    def run(self):
-        while True:
-            time.sleep(self.timeout)
-            if time.time() - self.last_update > self.timeout:
-                self.signal.set()
-
-
-async def main():
+async def main(ant_tx: AntPlusTx):
     scan_reqeust = asyncio.Event()
     scan_reqeust.clear()
-    kl = KeiserListener(4, scan_reqeust)
+    kl = KeiserListener(5, scan_reqeust)
     scanner = BleakScanner(kl.callback)
 
     pd = PowerData()
-    ant_tx = AntPlusTx()
 
     while True:
         scan_reqeust.clear()
         await scanner.start()
-        await scan_reqeust.wait()
+        try:
+            async with asyncio.timeout(1):
+                await scan_reqeust.wait()
+        except asyncio.TimeoutError:
+            print("Scan timeout, restarting\r", end="")
+            scan_reqeust.set()
         pd.update(kl.power, kl.cadence / 10)
         await scanner.stop()
 
@@ -176,9 +177,7 @@ async def main():
         payload.append(pd.instantaneousPower & 0xFF)
         payload.append(pd.instantaneousPower >> 8)
         # ant_msg = message.ChannelBroadcastDataMessage(p_chan.number, data=payload)
-        print(
-            f"Ver.{kl.version_minor}: {int(kl.power)} W {kl.cadence} RPM\r", end=""
-        )
+        print(f"Ver.{kl.version_minor}: {int(kl.power):3d} W {kl.cadence:3d} RPM\r", end="")
         # if VPOWER_DEBUG: print('Write message to ANT stick on channel ' + repr(self.channel.number))
         ant_tx.send_p(payload)
 
@@ -193,4 +192,12 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    ant_tx = AntPlusTx()
+
+    try:
+        asyncio.run(main(ant_tx))
+    except KeyboardInterrupt:
+        print("Exiting--------------------------------------")
+        ant_tx.c_chan.close()
+        ant_tx.p_chan.close()
+        ant_tx.node.stop()
