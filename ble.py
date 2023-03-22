@@ -1,9 +1,9 @@
 import asyncio
-import struct
+from keiser import KeiserBLEListener
 import time
 import usb
 
-from bleak import BleakScanner
+
 from ant.core import driver, node, message, constants, resetUSB
 
 
@@ -20,65 +20,6 @@ class PowerData:
         self.cumulativePower = (self.cumulativePower + int(power)) & 0xFFFF
         self.instantaneousPower = int(power)
         self.cadence = int(cadence) & 0xFF
-
-
-class KeiserListener:
-    def __init__(self, bike_id, scan_request) -> None:
-        self.bike_id = bike_id & 0xFF
-        self.scan_request = scan_request
-        self.version_major = 0
-        self.version_minor = 0
-        self.data_type = 0
-        self.cadence = 0
-        self.heart_rate = 0
-        self.power = 0
-        self.calories = 0
-        self.minutes = 0
-        self.seconds = 0
-        self.distance = 0
-        self.gear = 0
-
-    def callback(self, device, advertisement_data):
-        if device.name == "M3":
-            # print(advertisement_data)
-            if hasattr(advertisement_data, "manufacturer_data"):
-                msd = advertisement_data.manufacturer_data
-                if self.parse_keiser_msd(msd):
-                    self.scan_request.set()
-
-    def parse_keiser_msd(self, msd: dict):
-        for k, v in msd.items():
-            if k == 0x0102 and 17 == len(v) and v[3] == self.bike_id:
-                (
-                    self.version_major,
-                    self.version_minor,
-                    self.data_type,
-                    self.bike_id,
-                    self.cadence,
-                    self.heart_rate,
-                    self.power,
-                    self.calories,
-                    self.minutes,
-                    self.seconds,
-                    self.distance,
-                    self.gear,
-                ) = struct.unpack("<BBB" + "BHHH" + "HBBHB", v)
-
-                # print(f"Version Major: {version_major}")
-                # print(f"Version Minor: {version_minor}")
-                # print(f"Data Type: {data_type}")
-                # print(f"Equipment ID: {bike_id}")
-                # print(f"Cadence: {cadence}")
-                # print(f"Heart Rate: {heart_rate}")
-                # print(f"Power: {power}")
-                # print(f"Caloric Burn: {calories}")
-                # print(f"Duration Minutes: {minutes}")
-                # print(f"Duration Seconds: {seconds}")
-                # print(f"Distance: {distance}")
-                # print(f"Gear: {gear}")
-                if self.data_type == 0:
-                    return True
-        return False
 
 
 class AntPlusTx:
@@ -146,58 +87,53 @@ class AntPlusTx:
         ant_msg = message.ChannelBroadcastDataMessage(self.c_chan.number, data=payload)
         self.node.send(ant_msg)
 
-
-async def main(ant_tx: AntPlusTx):
-    scan_reqeust = asyncio.Event()
-    scan_reqeust.clear()
-    kl = KeiserListener(5, scan_reqeust)
-    scanner = BleakScanner(kl.callback)
-
-    pd = PowerData()
-
-    while True:
-        scan_reqeust.clear()
-        await scanner.start()
+    async def loop(self, kl, pd):
         try:
-            async with asyncio.timeout(1):
-                await scan_reqeust.wait()
-        except asyncio.TimeoutError:
-            print("Scan timeout, restarting\r", end="")
-            scan_reqeust.set()
-        pd.update(kl.power, kl.cadence / 10)
-        await scanner.stop()
+            while True:
+                await kl.new_data.wait()
+                # await asyncio.sleep(0.5)
+                pd.update(kl.power, kl.cadence)
+                kl.new_data.clear()
+                # https://www.thisisant.com/my-ant/join-adopter/
+                payload = bytearray(b"\x10")  # standard power-only message
+                payload.append(pd.eventCount & 0xFF)
+                payload.append(0xFF)  # Pedal power not used
+                payload.append(int(pd.cadence) & 0xFF)  # Cadence
+                payload.append(pd.cumulativePower & 0xFF)
+                payload.append(pd.cumulativePower >> 8)
+                payload.append(pd.instantaneousPower & 0xFF)
+                payload.append(pd.instantaneousPower >> 8)
+                # ant_msg = message.ChannelBroadcastDataMessage(p_chan.number, data=payload)
+                print(
+                    f"Ver.{kl.version_minor}: {int(kl.power):5d} W {int(kl.cadence)} RPM\r",
+                    end="",
+                )
+                # if VPOWER_DEBUG: print('Write message to ANT stick on channel ' + repr(self.channel.number))
+                ant_tx.send_p(payload)
 
-        # https://www.thisisant.com/my-ant/join-adopter/
-        payload = bytearray(b"\x10")  # standard power-only message
-        payload.append(pd.eventCount & 0xFF)
-        payload.append(0xFF)  # Pedal power not used
-        payload.append(int(pd.cadence) & 0xFF)  # Cadence
-        payload.append(pd.cumulativePower & 0xFF)
-        payload.append(pd.cumulativePower >> 8)
-        payload.append(pd.instantaneousPower & 0xFF)
-        payload.append(pd.instantaneousPower >> 8)
-        # ant_msg = message.ChannelBroadcastDataMessage(p_chan.number, data=payload)
-        print(f"Ver.{kl.version_minor}: {int(kl.power):3d} W {kl.cadence:3d} RPM\r", end="")
-        # if VPOWER_DEBUG: print('Write message to ANT stick on channel ' + repr(self.channel.number))
-        ant_tx.send_p(payload)
+        except asyncio.CancelledError:
+            print("Exitingdfasdafasdf")
+            ant_tx.c_chan.close()
+            ant_tx.p_chan.close()
+            ant_tx.node.stop()
 
-        # payload = bytearray(b'\x00ffffff')
-        # tt = int(time.time() * 1024) & 0xffff
-        # payload.append(tt & 0xff)
-        # payload.append(tt >> 8)
-        # payload.append(pd.cumulativePower & 0xff)
-        # payload.append(pd.cumulativePower >> 8)
-        # payload.append(pd.instantaneousPower & 0xff)
-        # payload.append(pd.instantaneousPower >> 8)
+
+async def main(ant_tx: AntPlusTx, kl: KeiserBLEListener):
+    kl_task = asyncio.create_task(kl.loop())
+    at_task = asyncio.create_task(ant_tx.loop(kl, PowerData()))
+
+    await kl_task
+    await at_task
 
 
 if __name__ == "__main__":
     ant_tx = AntPlusTx()
+    kl = KeiserBLEListener(bike_id=5)
 
     try:
-        asyncio.run(main(ant_tx))
+        asyncio.run(main(ant_tx, kl))
     except KeyboardInterrupt:
         print("Exiting--------------------------------------")
-        ant_tx.c_chan.close()
-        ant_tx.p_chan.close()
-        ant_tx.node.stop()
+        # ant_tx.c_chan.close()
+        # ant_tx.p_chan.close()
+        # ant_tx.node.stop()
