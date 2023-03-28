@@ -58,6 +58,7 @@ class KeiserBLEListener:
                     self.distance * 1609.344
                 # km
                 self.distance = (self.distance & 0x7FFF) / 10
+                self.resistence = self.gear / 24 * 100
                 # print(f"Version Major: {version_major}")
                 # print(f"Version Minor: {version_minor}")
                 # print(f"Data Type: {data_type}")

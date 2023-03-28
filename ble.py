@@ -50,33 +50,41 @@ class AntPlusTx:
         print("Starting ANT node")
         antnode.start()
 
-        SPEED_DEVICE_TYPE = 0x7B
-        CADENCE_DEVICE_TYPE = 0x7A
+        # SPEED_DEVICE_TYPE = 0x7B
+        # CADENCE_DEVICE_TYPE = 0x7A
         SPEED_CADENCE_DEVICE_TYPE = 0x79
+        FITNESS_EQUIPMENT_DEVICE_TYPE = 0x11
         POWER_DEVICE_TYPE = 0x0B
-        CHANNEL_PERIOD = 8182
-        POWER_SENSOR_ID = 3862
+        SENSOR_ID = 3862
 
-        print("Starting power meter with ANT+ ID " + repr(POWER_SENSOR_ID))
+        print("Starting power meter with ANT+ ID " + repr(SENSOR_ID))
         net_id = node.Network(constants.NETWORK_KEY_ANT_PLUS, "ZZ:ANT+")
         antnode.setNetworkKey(constants.NETWORK_NUMBER_PUBLIC, net_id)
 
         p_chan = antnode.getFreeChannel()
         p_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
-        p_chan.setID(POWER_DEVICE_TYPE, POWER_SENSOR_ID, 0)
+        p_chan.setID(POWER_DEVICE_TYPE, SENSOR_ID, 0)
         p_chan.period = 8182
         p_chan.frequency = 57
         p_chan.open()
 
-        c_chan = antnode.getFreeChannel()
-        c_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
-        c_chan.setID(SPEED_CADENCE_DEVICE_TYPE, POWER_SENSOR_ID, 0)
-        c_chan.period = 8102
-        c_chan.frequency = 57
-        c_chan.open()
+        # c_chan = antnode.getFreeChannel()
+        # c_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
+        # c_chan.setID(SPEED_CADENCE_DEVICE_TYPE, SENSOR_ID, 0)
+        # c_chan.period = 8102
+        # c_chan.frequency = 57
+        # c_chan.open()
+
+        f_chan = antnode.getFreeChannel()
+        f_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
+        f_chan.setID(FITNESS_EQUIPMENT_DEVICE_TYPE, SENSOR_ID, 0)
+        f_chan.period = 8192
+        f_chan.frequency = 57
+        f_chan.open()
 
         self.p_chan = p_chan
-        self.c_chan = c_chan
+        # self.c_chan = c_chan
+        self.f_chan = f_chan
         self.node = antnode
 
     def send_p(self, payload):
@@ -87,6 +95,10 @@ class AntPlusTx:
         ant_msg = message.ChannelBroadcastDataMessage(self.c_chan.number, data=payload)
         self.node.send(ant_msg)
 
+    def send_f(self, payload):
+        ant_msg = message.ChannelBroadcastDataMessage(self.f_chan.number, data=payload)
+        self.node.send(ant_msg)
+
     async def loop(self, kl, pd):
         try:
             while True:
@@ -94,8 +106,13 @@ class AntPlusTx:
                 # await asyncio.sleep(0.5)
                 pd.update(kl.power, kl.cadence)
                 kl.new_data.clear()
+                print(
+                    f"Ver.{kl.version_minor}: {int(kl.power):5d} W {int(kl.cadence)} RPM\r",
+                    end="",
+                )
+
                 # https://www.thisisant.com/my-ant/join-adopter/
-                payload = bytearray(b"\x10")  # standard power-only message
+                payload = bytearray(b"\x10")  # PWR
                 payload.append(pd.eventCount & 0xFF)
                 payload.append(0xFF)  # Pedal power not used
                 payload.append(int(pd.cadence) & 0xFF)  # Cadence
@@ -103,18 +120,33 @@ class AntPlusTx:
                 payload.append(pd.cumulativePower >> 8)
                 payload.append(pd.instantaneousPower & 0xFF)
                 payload.append(pd.instantaneousPower >> 8)
-                # ant_msg = message.ChannelBroadcastDataMessage(p_chan.number, data=payload)
-                print(
-                    f"Ver.{kl.version_minor}: {int(kl.power):5d} W {int(kl.cadence)} RPM\r",
-                    end="",
-                )
-                # if VPOWER_DEBUG: print('Write message to ANT stick on channel ' + repr(self.channel.number))
                 ant_tx.send_p(payload)
+
+                payload = bytearray(b"\x11")  # General Settings Page
+                payload.append(0xFF)
+                payload.append(0xFF)  # Cadence
+                payload.append(int(5 / 0.01) & 0xFF)
+                payload.append(0xFF)
+                payload.append(0x7F)
+                payload.append(int(kl.resistence * 2) & 0xFF)
+                payload.append(0x00)  # flags not used
+                ant_tx.send_f(payload)
+
+                payload = bytearray(b"\x19")  # FE power
+                payload.append(pd.eventCount & 0xFF)
+                payload.append(int(pd.cadence) & 0xFF)  # Cadence
+                payload.append(pd.cumulativePower & 0xFF)
+                payload.append(pd.cumulativePower >> 8)
+                payload.append(pd.instantaneousPower & 0xFF)
+                payload.append((pd.instantaneousPower >> 8) & 0x0F)
+                payload.append(0x00)  # flags not used
+                ant_tx.send_f(payload)
 
         except asyncio.CancelledError:
             print("Exitingdfasdafasdf")
-            ant_tx.c_chan.close()
             ant_tx.p_chan.close()
+            # ant_tx.c_chan.close()
+            ant_tx.f_chan.close()
             ant_tx.node.stop()
 
 
