@@ -22,7 +22,7 @@ class PowerData:
     def update(self, power, cadence):
         now = time.time()
         dt = now - self.lastEventTime
-        # set wheel to 100mm
+        # set wheel to 150mm
         # TODO: use power to estimate the rev count
         self.cumulativeRevs += dt * (cadence + self.cadence) / 2.
         self.lastEventTime = now
