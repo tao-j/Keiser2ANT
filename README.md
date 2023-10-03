@@ -1,6 +1,6 @@
 # Keiser BLE GAP to ANT+
 
-This project listens to Keiser M series BLE broadcast (GAP) and retransmit them in ANT+ compatible profiles.
+This project listens to Keiser M series BLE broadcast ([GAP spec](https://dev.keiser.com/mseries/direct/)) and retransmit them in ANT+ compatible profiles. ANT+ specs can be obtained but not distributed at [here](https://www.thisisant.com/my-ant/join-adopter/).
 
 ## Hardware requirement
 + A BLE compatible receiver

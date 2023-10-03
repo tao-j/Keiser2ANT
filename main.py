@@ -2,38 +2,111 @@ import asyncio
 from keiser import KeiserBLEListener
 import time
 import usb
-
+import struct
 
 from ant.core import driver, node, message, constants, resetUSB
 
 
-class PowerData:
+def uint8(val):
+    return int(val) & 0xFF
+
+
+def uint16(val):
+    return int(val) & 0xFFFF
+
+
+class BikeDataByIntegration:
     def __init__(self):
-        self.eventCount = 0
-        self.eventTime = 0
-        self.cumulativePower = 0
-        self.instantaneousPower = 0
+        # last feed readings to be sent
+        self.power = 0
         self.cadence = 0
-        self.lastEventTime = time.time()
-        self.cumulativeRevs = 0
-        self.int_cum_rev = 0
-        self.int_time = 0
+        self.speed = 0
 
-    def update(self, power, cadence):
+        # power events
+        self.power_event_counts = 0
+        self.cum_power = 0
+
+        # speed
+        self.init_time = time.time()
+        self.last_feed_time = self.init_time
+        self.cum_rev = 0
+        self.cum_rev_count = 0
+        self.event_time_ms = 0
+
+    def get_event_count(self):
+        return uint8(self.power_event_counts)
+
+    def get_cadence(self):
+        return uint8(self.cadence)
+
+    def get_power(self):
+        return uint16(self.power)
+
+    def get_cum_power(self):
+        return uint16(self.cum_power)
+
+    def get_event_time_ms(self):
+        return uint16(self.event_time_ms)
+
+    def get_cum_rev_count(self):
+        return uint16(self.cum_rev_count)
+
+    def power_to_speed(self, power):
+        """
+        power in watts
+        speed in m/s
+        """
+        Cd = 0.9
+        A = 0.5
+        rho = 1.225
+        Crr = 0.0045
+        F_gravity = 75 * 9.81
+
+        # Define the power equations
+        coeff_P_drag = 0.5 * Cd * A * rho  # * v**3
+        coeff_P_roll = Crr * F_gravity  # * v
+
+        # P_drag v^3 + P_roll v + (-power) = 0
+        p = coeff_P_roll / coeff_P_drag
+        q = -power / coeff_P_drag
+
+        delta = p**3 / 27 + q**2 / 4
+        cubic_root = lambda x: x ** (1.0 / 3) if x > 0 else -((-x) ** (1.0 / 3))
+        u = cubic_root(-q / 2 + delta ** (1.0 / 2))
+        v = cubic_root(-q / 2 - delta ** (1.0 / 2))
+
+        return u + v
+
+    def feed(self, power, cadence):
+        """
+        feed instantaneous power/cadence readings and infer bike speed
+        also update the cumulative power and cadence
+        """
+        speed = self.power_to_speed(power)
+        # print(f"speed: {self.speed} m/s")
+
         now = time.time()
-        dt = now - self.lastEventTime
-        # set wheel to 9000mm
-        # TODO: use power to estimate the rev count
-        self.cumulativeRevs += dt * (cadence + self.cadence) / 2.0 / 60
-        self.lastEventTime = now
+        dt = now - self.last_feed_time
+        self.last_feed_time = now
 
-        self.eventCount = (self.eventCount + 1) & 0xFF
-        self.cumulativePower = (self.cumulativePower + int(power)) & 0xFFFF
-        self.instantaneousPower = int(power)
-        self.cadence = int(cadence) & 0xFF
+        # speed events
+        # set wheel to 700c*25 or ~2096mm
+        WHEEL_CIRCUMFERENCE = 2.096
+        self.cum_rev += (speed + self.speed) / 2 * dt / WHEEL_CIRCUMFERENCE
+        diff = self.cum_rev - self.cum_rev_count
+        if diff >= 1:
+            self.event_time_ms = now * 1024 - (
+                now * 1024 - self.event_time_ms
+            ) / diff * (diff - int(diff))
+            self.cum_rev_count = int(self.cum_rev)
 
-        self.int_cum_rev = int(self.cumulativeRevs) % 0xFFFF
-        self.int_time = int(self.lastEventTime * 1024) % 0xFFFF
+        # power events
+        self.power_event_counts += 1
+        self.cum_power += power
+
+        self.cadence = cadence
+        self.power = power
+        self.speed = speed
 
 
 class AntPlusTx:
@@ -65,9 +138,9 @@ class AntPlusTx:
         print("Starting ANT node")
         antnode.start()
 
-        # SPEED_DEVICE_TYPE = 0x7B
-        # CADENCE_DEVICE_TYPE = 0x7A
-        SPEED_CADENCE_DEVICE_TYPE = 0x79
+        SPEED_DEVICE_TYPE = 0x7B  # 8118
+        # CADENCE_DEVICE_TYPE = 0x7A # 8102
+        # SPEED_CADENCE_DEVICE_TYPE = 0x79  # 8086
         # FITNESS_EQUIPMENT_DEVICE_TYPE = 0x11
         POWER_DEVICE_TYPE = 0x0B
         SENSOR_ID = 3862
@@ -89,8 +162,8 @@ class AntPlusTx:
 
         c_chan = antnode.getFreeChannel()
         c_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
-        c_chan.setID(SPEED_CADENCE_DEVICE_TYPE, SENSOR_ID, 0)
-        c_chan.period = 8102
+        c_chan.setID(SPEED_DEVICE_TYPE, SENSOR_ID, 0)
+        c_chan.period = 8118
         c_chan.frequency = 57
         c_chan.open()
         self.c_chan = c_chan
@@ -113,42 +186,43 @@ class AntPlusTx:
 
     async def loop(self, kl, pd):
         try:
-            i = 0
             while True:
-                i = (i + 1) % 4
                 await kl.new_data.wait()
-                # await asyncio.sleep(0.5)
-                # kl.power = 110
-                # kl.cadence = 88
-                pd.update(kl.power, kl.cadence)
+                # await asyncio.sleep(0.25)
+                # kl.power = 11
+                # kl.cadence = 222
+                pd.feed(kl.power, kl.cadence)
                 kl.new_data.clear()
                 print(
-                    f"Ver.{kl.version_minor}: {int(kl.power):5d} W {int(kl.cadence)} RPM {pd.int_cum_rev} REVs {pd.int_time}s /1024 \r",
-                    end="",
+                    f"Ver.{kl.version_minor}:"
+                    f"{int(pd.power):5d} W {int(pd.cadence)} RPM {pd.cum_rev_count} REV "
+                    f"{pd.get_event_time_ms()} ms {pd.speed * 3.6 / 1.67:.1f} mph\r",
+                    end="\n",
                 )
 
-                # https://www.thisisant.com/my-ant/join-adopter/
-                payload = bytearray(b"\x10")  # PWR
-                payload.append(pd.eventCount & 0xFF)
-                payload.append(0xFF)  # Pedal power not used
-                payload.append(int(pd.cadence) & 0xFF)  # Cadence
-                payload.append(pd.cumulativePower & 0xFF)
-                payload.append(pd.cumulativePower >> 8)
-                payload.append(pd.instantaneousPower & 0xFF)
-                payload.append(pd.instantaneousPower >> 8)
+                PWR_PAGE_ID = 0x10
+                payload = struct.pack(
+                    "<BB" + "BB" + "HH",
+                    *[
+                        PWR_PAGE_ID,
+                        pd.get_event_count(),
+                        0xFF,  # Pedal power not used
+                        pd.get_cadence(),
+                        pd.get_cum_power(),
+                        pd.get_power(),
+                    ],
+                )
                 ant_tx.send_msg(ant_tx.p_chan, payload)
 
-                if i == 0:
-                    payload = bytearray(b"\x05")  # Motion and Speed Page
-                else:
-                    payload = bytearray(b"\x86")  # Motion and Speed Page
-                payload.append(0x00)
-                payload.append(0xFF)
-                payload.append(0xFF)
-                payload.append(pd.int_time & 0xFF)  # Event Time LSB 1/1024
-                payload.append(pd.int_time >> 8)  # Event Time MSB
-                payload.append(pd.int_cum_rev & 0xFF)  # Rev Count LSB
-                payload.append(pd.int_cum_rev >> 8)  # Rev Count MSB
+                DEFAULT_PAGE_ID = 0x00
+                payload = struct.pack(
+                    "<B" + "BH" + "HH",
+                    DEFAULT_PAGE_ID,
+                    0xFF,
+                    0xFFFF,
+                    pd.get_event_time_ms(),
+                    pd.get_cum_rev_count(),
+                )
                 ant_tx.send_msg(ant_tx.c_chan, payload)
 
                 # payload = bytearray(b"\x11")  # General Settings Page
@@ -162,12 +236,12 @@ class AntPlusTx:
                 # ant_tx.send_f(payload)
 
                 # payload = bytearray(b"\x19")  # FE power
-                # payload.append(pd.eventCount & 0xFF)
+                # payload.append(pd.power_event_counts & 0xFF)
                 # payload.append(int(pd.cadence) & 0xFF)  # Cadence
-                # payload.append(pd.cumulativePower & 0xFF)
-                # payload.append(pd.cumulativePower >> 8)
-                # payload.append(pd.instantaneousPower & 0xFF)
-                # payload.append((pd.instantaneousPower >> 8) & 0x0F)
+                # payload.append(pd.cum_power & 0xFF)
+                # payload.append(pd.cum_power >> 8)
+                # payload.append(pd.power & 0xFF)
+                # payload.append((pd.power >> 8) & 0x0F)
                 # payload.append(0x00)  # flags not used
                 # ant_tx.send_f(payload)
 
@@ -180,7 +254,7 @@ class AntPlusTx:
 
 async def main(ant_tx: AntPlusTx, kl: KeiserBLEListener):
     kl_task = asyncio.create_task(kl.loop())
-    at_task = asyncio.create_task(ant_tx.loop(kl, PowerData()))
+    at_task = asyncio.create_task(ant_tx.loop(kl, BikeDataByIntegration()))
 
     await kl_task
     await at_task
