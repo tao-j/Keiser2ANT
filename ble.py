@@ -22,9 +22,9 @@ class PowerData:
     def update(self, power, cadence):
         now = time.time()
         dt = now - self.lastEventTime
-        # set wheel to 150mm
+        # set wheel to 9000mm
         # TODO: use power to estimate the rev count
-        self.cumulativeRevs += dt * (cadence + self.cadence) / 2.
+        self.cumulativeRevs += dt * (cadence + self.cadence) / 2.0 / 60
         self.lastEventTime = now
 
         self.eventCount = (self.eventCount + 1) & 0xFF
@@ -60,6 +60,7 @@ class AntPlusTx:
                 break
         else:
             print("No ANT devices available")
+            exit(1)
         antnode = node.Node(stick)
         print("Starting ANT node")
         antnode.start()
@@ -67,13 +68,15 @@ class AntPlusTx:
         # SPEED_DEVICE_TYPE = 0x7B
         # CADENCE_DEVICE_TYPE = 0x7A
         SPEED_CADENCE_DEVICE_TYPE = 0x79
-        FITNESS_EQUIPMENT_DEVICE_TYPE = 0x11
+        # FITNESS_EQUIPMENT_DEVICE_TYPE = 0x11
         POWER_DEVICE_TYPE = 0x0B
         SENSOR_ID = 3862
 
-        print("Starting power meter with ANT+ ID " + repr(SENSOR_ID))
+        print("Starting CSC/CP with ANT+ ID " + repr(SENSOR_ID))
         net_id = node.Network(constants.NETWORK_KEY_ANT_PLUS, "ZZ:ANT+")
         antnode.setNetworkKey(constants.NETWORK_NUMBER_PUBLIC, net_id)
+
+        self.chans = []
 
         p_chan = antnode.getFreeChannel()
         p_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
@@ -81,6 +84,8 @@ class AntPlusTx:
         p_chan.period = 8182
         p_chan.frequency = 57
         p_chan.open()
+        self.p_chan = p_chan
+        self.chans.append(p_chan)
 
         c_chan = antnode.getFreeChannel()
         c_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
@@ -88,6 +93,8 @@ class AntPlusTx:
         c_chan.period = 8102
         c_chan.frequency = 57
         c_chan.open()
+        self.c_chan = c_chan
+        self.chans.append(c_chan)
 
         # f_chan = antnode.getFreeChannel()
         # f_chan.assign(net_id, constants.CHANNEL_TYPE_TWOWAY_TRANSMIT)
@@ -95,22 +102,13 @@ class AntPlusTx:
         # f_chan.period = 8192
         # f_chan.frequency = 57
         # f_chan.open()
-
-        self.p_chan = p_chan
-        self.c_chan = c_chan
         # self.f_chan = f_chan
+        # self.chans.append(f_chan)
+
         self.node = antnode
 
-    def send_p(self, payload):
-        ant_msg = message.ChannelBroadcastDataMessage(self.p_chan.number, data=payload)
-        self.node.send(ant_msg)
-
-    def send_c(self, payload):
-        ant_msg = message.ChannelBroadcastDataMessage(self.c_chan.number, data=payload)
-        self.node.send(ant_msg)
-
-    def send_f(self, payload):
-        ant_msg = message.ChannelBroadcastDataMessage(self.f_chan.number, data=payload)
+    def send_msg(self, chan, payload):
+        ant_msg = message.ChannelBroadcastDataMessage(chan.number, data=payload)
         self.node.send(ant_msg)
 
     async def loop(self, kl, pd):
@@ -120,6 +118,8 @@ class AntPlusTx:
                 i = (i + 1) % 4
                 await kl.new_data.wait()
                 # await asyncio.sleep(0.5)
+                # kl.power = 110
+                # kl.cadence = 88
                 pd.update(kl.power, kl.cadence)
                 kl.new_data.clear()
                 print(
@@ -136,7 +136,7 @@ class AntPlusTx:
                 payload.append(pd.cumulativePower >> 8)
                 payload.append(pd.instantaneousPower & 0xFF)
                 payload.append(pd.instantaneousPower >> 8)
-                ant_tx.send_p(payload)
+                ant_tx.send_msg(ant_tx.p_chan, payload)
 
                 if i == 0:
                     payload = bytearray(b"\x05")  # Motion and Speed Page
@@ -149,7 +149,7 @@ class AntPlusTx:
                 payload.append(pd.int_time >> 8)  # Event Time MSB
                 payload.append(pd.int_cum_rev & 0xFF)  # Rev Count LSB
                 payload.append(pd.int_cum_rev >> 8)  # Rev Count MSB
-                ant_tx.send_c(payload)
+                ant_tx.send_msg(ant_tx.c_chan, payload)
 
                 # payload = bytearray(b"\x11")  # General Settings Page
                 # payload.append(0xFF)
@@ -172,10 +172,9 @@ class AntPlusTx:
                 # ant_tx.send_f(payload)
 
         except asyncio.CancelledError:
-            print("Exitingdfasdafasdf")
-            ant_tx.p_chan.close()
-            ant_tx.c_chan.close()
-            # ant_tx.f_chan.close()
+            print("Exiting: cancelled")
+            for chan in ant_tx.chans:
+                chan.close()
             ant_tx.node.stop()
 
 
@@ -188,13 +187,20 @@ async def main(ant_tx: AntPlusTx, kl: KeiserBLEListener):
 
 
 if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) == 2:
+        bike_id = int(sys.argv[1])
+    else:
+        bike_id = 1
+
     ant_tx = AntPlusTx()
-    kl = KeiserBLEListener(bike_id=4)
+    kl = KeiserBLEListener(bike_id=bike_id)
 
     try:
         asyncio.run(main(ant_tx, kl))
     except KeyboardInterrupt:
         print("Exiting--------------------------------------")
-        # ant_tx.c_chan.close()
-        # ant_tx.p_chan.close()
-        # ant_tx.node.stop()
+        for chan in ant_tx.chans:
+            chan.close()
+        ant_tx.node.stop()

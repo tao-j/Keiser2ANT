@@ -1,7 +1,6 @@
 import asyncio
 import struct
 from bleak import BleakScanner
-import time
 
 
 class KeiserBLEListener:

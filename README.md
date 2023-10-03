@@ -1,6 +1,6 @@
 # Keiser BLE GAP to ANT+
 
-This is a proof of concept work for receiving Keiser M series bike BLE broadcast signal and retransmit them in ANT+ compatible profiles.
+This project listens to Keiser M series BLE broadcast (GAP) and retransmit them in ANT+ compatible profiles.
 
 ## Hardware requirement
 + A BLE compatible receiver
@@ -9,7 +9,7 @@ This is a proof of concept work for receiving Keiser M series bike BLE broadcast
     + `ANT-USBm` (based on NRF 24L01P)
     + Or other ones supports Ant+ Tx
 
-It is believed that CYCPLUS one does not work.
+It is believed that CYCPLUS branded ones do not work.
 
 ## Dependencies
 ```
