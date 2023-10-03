@@ -1,138 +1,215 @@
-"""
-Example for a BLE 4.0 Server using a GATT dictionary of services and
-characteristics
-"""
-
-import logging
+from typing import Union
+from bluez_peripheral.gatt.service import Service, ServiceCollection
+from bluez_peripheral.gatt.characteristic import (
+    characteristic,
+    CharacteristicFlags as CharFlags,
+)
+from bluez_peripheral.util import *
+from bluez_peripheral.advert import Advertisement
+from bluez_peripheral.agent import NoIoAgent
 import asyncio
-import threading
 
-from typing import Any, Dict
+import struct
 
-from bless import (  # type: ignore
-        BlessServer,
-        BlessGATTCharacteristic,
-        GATTCharacteristicProperties,
-        GATTAttributePermissions
+from bluez_peripheral.util import Collection
+from bluez_peripheral.uuid import BTUUID as UUID
+
+# cycling speed and cadence
+CSC_UUID = "1816"
+CSC_MEASUREMENT_UUID = "2A5B"
+CSC_FEATURE_UUID = "2A5C"
+
+# cycling power
+CP_UUID = "1818"
+CP_MEASUREMENT_UUID = "2A63"
+CP_FEATURE_UUID = "2A65"
+
+SENSOR_LOCATION_UUID = "2A5D"
+
+# device information
+DI_UUID = "180A"
+DI_SYSTEM_ID_UUID = "2A23"
+DI_MODEL_NUMBER_UUID = "2A24"
+DI_SERIAL_NUMBER_UUID = "2A25"
+DI_FIRMWARE_REVISION_UUID = "2A26"
+DI_HARDWARE_REVISION_UUID = "2A27"
+DI_SOFTWARE_REVISION_UUID = "2A28"
+DI_MANUFACTURER_NAME_UUID = "2A29"
+
+
+CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT = 0b0000_0001
+CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT = 0b0000_0010
+
+# feature flags
+CP_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT = 0b0001_0000
+CP_F_BIT_CRANK_REVOLUTION_DATA_PRESENT = 0b0010_0000
+# measurement flags
+CP_M_BIT_WHEEL_REVOLUTION_DATA_PRESENT = 0b0000_0100
+CP_M_BIT_CRANK_REVOLUTION_DATA_PRESENT = 0b0000_1000
+
+
+class DeviceInformationService(Service):
+    def __init__(self):
+        super().__init__(DI_UUID)
+
+    @characteristic(DI_SYSTEM_ID_UUID, CharFlags.READ)
+    def system_id(self, options):
+        return struct.pack("<Q", *[0x0000022001100000])
+
+    @characteristic(DI_MODEL_NUMBER_UUID, CharFlags.READ)
+    def model_number(self, options):
+        return bytearray(b"Keiser M to GATT")
+
+    @characteristic(DI_SERIAL_NUMBER_UUID, CharFlags.READ)
+    def serial_number(self, options):
+        return bytearray(b"12345678")
+
+    @characteristic(DI_FIRMWARE_REVISION_UUID, CharFlags.READ)
+    def firmware_revision(self, options):
+        return bytearray(b"0.0.1")
+
+    @characteristic(DI_HARDWARE_REVISION_UUID, CharFlags.READ)
+    def hardware_revision(self, options):
+        return bytearray(b"0.1.1")
+
+    @characteristic(DI_SOFTWARE_REVISION_UUID, CharFlags.READ)
+    def software_revision(self, options):
+        return bytearray(b"1.0beta")
+
+    @characteristic(DI_MANUFACTURER_NAME_UUID, CharFlags.READ)
+    def manufacturer_name(self, options):
+        return bytearray(b"t-j")
+
+
+class CPService(Service):
+    def __init__(self):
+        self.measure_flags = (
+            0x0
+            # | CP_M_BIT_CRANK_REVOLUTION_DATA_PRESENT
+            | CP_M_BIT_WHEEL_REVOLUTION_DATA_PRESENT
+        )
+        self.feature_flags = (
+            0x0 
+            # | CP_F_BIT_CRANK_REVOLUTION_DATA_PRESENT
+            | CP_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT
+        )
+        super().__init__(CP_UUID, primary=True)
+
+    @characteristic(CP_MEASUREMENT_UUID, CharFlags.NOTIFY | CharFlags.READ)
+    def cp_measurement(self, options):
+        pass
+
+    def notify_new_rate(self, power, time_in_ms, wheel_rev, crank_rev):
+        rate = struct.pack(
+            "<HhIH",
+            *[
+                self.measure_flags,
+                power & 0x7FFF,
+                wheel_rev & 0xFFFFFFFF,
+                (2 * time_in_ms) & 0xFFFF,
+                # crank_rev & 0xFFFF,
+                # time_in_ms & 0xFFFF,
+            ],
+        )
+        self.cp_measurement.changed(rate)
+
+    @characteristic(CP_FEATURE_UUID, CharFlags.READ)
+    def cp_feature(self, options):
+        return struct.pack("<I", *[self.feature_flags])
+
+    @characteristic(SENSOR_LOCATION_UUID, CharFlags.READ)
+    def sensor_location(self, options):
+        return bytearray(b"\x0d")
+
+
+class CSCService(Service):
+    def __init__(self):
+        super().__init__(CSC_UUID, True)
+        self.feature = (
+            CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT
+            # |  CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT
         )
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(name=__name__)
-trigger: asyncio.Event = asyncio.Event()
+    @characteristic(CSC_MEASUREMENT_UUID, CharFlags.NOTIFY | CharFlags.READ)
+    def csc_measurement(self, options):
+        pass
+
+    def notify_new_rate(self, wheel_rev, crank_rev, time_in_ms):
+        rate = struct.pack(
+            "<BIH",
+            # "<BHH",
+            self.feature,
+            wheel_rev & 0xFFFFFFFF,
+            time_in_ms & 0xFFFF,
+            # crank_rev & 0xFFFF,
+            # time_in_ms & 0xFFFF,
+        )
+        self.csc_measurement.changed(rate)
+
+    @characteristic(CSC_FEATURE_UUID, CharFlags.READ)
+    def csc_feature(self, options):
+        return struct.pack("<H", *[self.feature])
+
+    @characteristic(SENSOR_LOCATION_UUID, CharFlags.READ)
+    def sensor_location(self, options):
+        return bytearray(b"\x0d")
 
 
-def read_request(
-        characteristic: BlessGATTCharacteristic,
-        **kwargs
-        ) -> bytearray:
-    logger.debug(f"Reading {characteristic.value}")
-    return characteristic.value
+import time
 
 
-def write_request(
-        characteristic: BlessGATTCharacteristic,
-        value: Any,
-        **kwargs
-        ):
-    characteristic.value = value
-    logger.debug(f"Char value set to {characteristic.value}")
-    if characteristic.value == b'\x0f':
-        logger.debug("Nice")
-        trigger.set()
+async def main():
+    # system busmfrom dbus_next.
+    bus = await get_message_bus()
+
+    csc_service = CSCService()
+    cp_service = CPService()
+    di_service = DeviceInformationService()
+    svcs = ServiceCollection([cp_service])
+    await svcs.register(bus)
+    # await csc_service.register(bus)
+
+    # An agent is required to handle pairing
+    agent = NoIoAgent()
+    # This script needs superuser for this to work.
+    await agent.register(bus)
+
+    adapter = await Adapter.get_first(bus)
+    print(await adapter.get_address())
+
+    # Start an advert that will last for 60 seconds.
+    advert = Advertisement("KeiserGAP2GATT CSC CP", [CP_UUID], 0x0480, 0)
+    await advert.register(bus, adapter)
+
+    import random
+
+    last_t = time.time()
+    wheel_rev = 1
+    crank_rev = 1
+    rev = 0
+    interval = 0.1
+    while True:
+        await asyncio.sleep(interval)
+        this_t = time.time() - last_t
+        time_in_ms = int(this_t * 1024)
+        power = random.randint(120, 130)
+
+        # rev += (60. + int(this_t) % 20) / 60 * interval
+        rev += interval
+        wheel_rev = int(rev)
+        crank_rev = int(rev)
+        print(rev, this_t, wheel_rev, crank_rev, time_in_ms)
+        csc_service.notify_new_rate(
+            wheel_rev=wheel_rev, crank_rev=crank_rev, time_in_ms=time_in_ms
+        )
+        cp_service.notify_new_rate(
+            power=power, wheel_rev=wheel_rev, crank_rev=crank_rev, time_in_ms=time_in_ms
+        )
+        # print("updated", rev, end="\r")
+        # Handle dbus requests.
+
+    await bus.wait_for_disconnect()
 
 
-async def run(loop):
-    trigger.clear()
-
-    # Instantiate the server
-    gatt: Dict = {
-            "A07498CA-AD5B-474E-940D-16F1FBE7E8CD": {
-                "51FF12BB-3ED8-46E5-B4F9-D64E2FEC021B": {
-                    "Properties": (GATTCharacteristicProperties.read |
-                                   GATTCharacteristicProperties.write |
-                                   GATTCharacteristicProperties.indicate),
-                    "Permissions": (GATTAttributePermissions.readable |
-                                    GATTAttributePermissions.writeable),
-                    "Value": None
-                }
-            },
-            "00001816-0000-1000-8000-00805f9b34fb": {
-                "00002a5b-0000-1000-8000-00805f9b34fb": { # CSC Measurement
-                    "Properties": GATTCharacteristicProperties.notify |
-                                   GATTCharacteristicProperties.read,
-                    "Permissions": GATTAttributePermissions.readable,
-                    "Value": bytearray(b'\x00\x00\x00\x00')
-                },
-                "00002a5c-0000-1000-8000-00805f9b34fb": { # CSC Feature
-                    "Properties": GATTCharacteristicProperties.read,
-                    "Permissions": GATTAttributePermissions.readable,
-                    "Value": bytearray(b'\x69')
-                },
-                "00002a5d-0000-1000-8000-00805f9b34fb": { # Sensor Location
-                    "Properties": GATTCharacteristicProperties.read,
-                    "Permissions": GATTAttributePermissions.readable,
-                    "Value": bytearray(b'\x0d')
-                },
-            },
-            "00001818-0000-1000-8000-00805f9b34fb": { # Cycling Power Service
-                "00002a63-0000-1000-8000-00805f9b34fb": { # Cycling Power Measurement
-                    "Properties": (GATTCharacteristicProperties.notify |
-                                   GATTCharacteristicProperties.read),
-                    "Permissions": GATTAttributePermissions.readable,
-                    "Value": bytearray(b'\x08\x00\x00\x00\x08\x00\x00\x00\x08\x00\x00\x00\x08\x00')
-                },
-                # "00002a64-0000-1000-8000-00805f9b34fb": { # Cycling Power Vector
-                #     "Properties": GATTCharacteristicProperties.read,
-                #     "Permissions": GATTAttributePermissions.readable,
-                #     "Value": bytearray(b'\x00\x00\x00\x00')
-                # },
-                "00002a65-0000-1000-8000-00805f9b34fb": { # Cycling Power Feature
-                    "Properties": GATTCharacteristicProperties.read,
-                    "Permissions": GATTAttributePermissions.readable,
-                    "Value": bytearray(b'\x08\x00\x00\x00')
-                },
-                "00002a5d-0000-1000-8000-00805f9b34fb": { # Sensor Location
-                    "Properties": GATTCharacteristicProperties.read,
-                    "Permissions": GATTAttributePermissions.readable,
-                    "Value": bytearray(b'\x0d')
-                },
-            }
-        }
-    # https://github.com/zacharyedwardbull/pycycling/blob/master/pycycling/cycling_power_service.py
-    my_service_name = "Bike Power Service"
-    server = BlessServer(name=my_service_name, loop=loop)
-    server.read_request_func = read_request
-    server.write_request_func = write_request
-
-    for service in gatt:
-        await server.add_new_service(service)
-        for characteristic in gatt[service]:
-            await server.add_new_characteristic(
-                    service,
-                    characteristic,
-                    gatt[service][characteristic]["Properties"],
-                    gatt[service][characteristic]["Value"],
-                    gatt[service][characteristic]["Permissions"],
-                    )
-    # await server.add_gatt(gatt)
-    await server.start()
-    # logger.debug(server.get_characteristic(
-        # "51FF12BB-3ED8-46E5-B4F9-D64E2FEC021B"))
-    # logger.debug("Advertising")
-    # logger.info("Write '0xF' to the advertised characteristic: " +
-    #             "51FF12BB-3ED8-46E5-B4F9-D64E2FEC021B")
-    # await trigger.wait()
-    # await asyncio.sleep(2)
-    logger.debug("Updating")
-    # server.get_characteristic("51FF12BB-3ED8-46E5-B4F9-D64E2FEC021B").value = (
-    #         bytearray(b"i")
-    #         )
-    server.update_value(
-            "A07498CA-AD5B-474E-940D-16F1FBE7E8CD",
-            "51FF12BB-3ED8-46E5-B4F9-D64E2FEC021B"
-            )
-    await asyncio.sleep(5000)
-    await server.stop()
-
-loop = asyncio.get_event_loop()
-loop.run_until_complete(run(loop))
+if __name__ == "__main__":
+    asyncio.run(main())
