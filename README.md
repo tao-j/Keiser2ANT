@@ -1,9 +1,10 @@
 This project attempts to implement a translator from Keiser BLE GAP message to a BLE GATT peripheral.
 
 Currently, progress has been made from last time:
-+ CSC connects to Garmin when wheel revolution is enabled, and the wheel diameter can be set. If crank revolution data bit is set then it is unable to set wheel diameter regardless of the presence of wheel data. CP is believed not compatible with Garmin.
-+ CSC/CP somehow works for watchOS 10. But even a 10Hz signal with 60RPM wheel does not guarantee a smooth data display on workout app.
++ CSC/CP works for watchOS 10. But sometimes it is unable to setup wheel dimension.
++ CSC connects to Garmin when wheel revolution is enabled, and the wheel diameter can be set. If crank revolution data bit is set then it is unable to set wheel diameter regardless of the presence of wheel data. The trick is to add an empty SC control point. CP works if only send power data.
 + CSC/CP can be picked up by Zwift, but displays no data.
++ CSC can be picked up by nRF Toolbox with Battery Service implemented, wheel speed is fine, but cadence jumps between 0 and a sensible value.
 
 Related info
 + Linux uses `dbus` to manage `bluez`. [`bluez-peripheral`](https://github.com/spacecheese/bluez_peripheral) is a wrapper abstracts peripheral role devices. Quick concept overview of dbus [by bootlin](https://bootlin.com/pub/conferences/2016/meetup/dbus/josserand-dbus-meetup.pdf)

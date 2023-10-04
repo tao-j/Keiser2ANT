@@ -5,7 +5,7 @@ from bluez_peripheral.gatt.characteristic import (
     CharacteristicFlags as CharFlags,
 )
 from bluez_peripheral.util import *
-from bluez_peripheral.advert import Advertisement
+from bluez_peripheral.advert import Advertisement, AdvertisingIncludes
 from bluez_peripheral.agent import NoIoAgent
 import asyncio
 
@@ -18,13 +18,34 @@ from bluez_peripheral.uuid import BTUUID as UUID
 CSC_UUID = "1816"
 CSC_MEASUREMENT_UUID = "2A5B"
 CSC_FEATURE_UUID = "2A5C"
+SC_CONTROL_POINT_UUID = "2A55"
 
 # cycling power
 CP_UUID = "1818"
 CP_MEASUREMENT_UUID = "2A63"
+CP_VECTOR_UUID = "2A64"
 CP_FEATURE_UUID = "2A65"
+CP_CONTROL_POINT_UUID = "2A66"
 
 SENSOR_LOCATION_UUID = "2A5D"
+SENSOR_LOCATION_CHAR_UUID = 0x2A5D
+SENSOR_LOCATION_OTHER = 0
+SENSOR_LOCATION_TOP_OF_SHOE = 1
+SENSOR_LOCATION_IN_SHOE = 2
+SENSOR_LOCATION_HIP = 3
+SENSOR_LOCATION_FRONT_WHEEL = 4
+SENSOR_LOCATION_LEFT_CRANK = 5
+SENSOR_LOCATION_RIGHT_CRANK = 6
+SENSOR_LOCATION_LEFT_PEDAL = 7
+SENSOR_LOCATION_RIGHT_PEDAL = 8
+SENSOR_LOCATION_FRONT_HUB = 9
+SENSOR_LOCATION_REAR_DROPOUT = 10
+SENSOR_LOCATION_CHAINSTAY = 11
+SENSOR_LOCATION_REAR_WHEEL = 12
+SENSOR_LOCATION_REAR_HUB = 13
+SENSOR_LOCATION_CHEST = 14
+SENSOR_LOCATION_SPIDER = 15
+SENSOR_LOCATION_CHAIN_RING = 16
 
 # device information
 DI_UUID = "180A"
@@ -36,6 +57,9 @@ DI_HARDWARE_REVISION_UUID = "2A27"
 DI_SOFTWARE_REVISION_UUID = "2A28"
 DI_MANUFACTURER_NAME_UUID = "2A29"
 
+# battery service
+BAT_UUID = "180F"
+BAT_LEVEL_UUID = "2A19"
 
 CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT = 0b0000_0001
 CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT = 0b0000_0010
@@ -46,6 +70,15 @@ CP_F_BIT_CRANK_REVOLUTION_DATA_PRESENT = 0b0010_0000
 # measurement flags
 CP_M_BIT_WHEEL_REVOLUTION_DATA_PRESENT = 0b0000_0100
 CP_M_BIT_CRANK_REVOLUTION_DATA_PRESENT = 0b0000_1000
+
+
+class BatteryService(Service):
+    def __init__(self):
+        super().__init__(BAT_UUID, primary=True)
+
+    @characteristic(BAT_LEVEL_UUID, CharFlags.READ | CharFlags.NOTIFY)
+    def battery_level(self, options):
+        return struct.pack("<B", *[100])
 
 
 class DeviceInformationService(Service):
@@ -86,12 +119,12 @@ class CPService(Service):
         self.measure_flags = (
             0x0
             # | CP_M_BIT_CRANK_REVOLUTION_DATA_PRESENT
-            | CP_M_BIT_WHEEL_REVOLUTION_DATA_PRESENT
+            # | CP_M_BIT_WHEEL_REVOLUTION_DATA_PRESENT
         )
         self.feature_flags = (
-            0x0 
+            0x0
             # | CP_F_BIT_CRANK_REVOLUTION_DATA_PRESENT
-            | CP_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT
+            # | CP_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT
         )
         super().__init__(CP_UUID, primary=True)
 
@@ -99,16 +132,16 @@ class CPService(Service):
     def cp_measurement(self, options):
         pass
 
-    def notify_new_rate(self, power, time_in_ms, wheel_rev, crank_rev):
+    def notify_new_rate(self, power, w_event_ms, c_event_ms, crank_rev, wheel_rev):
         rate = struct.pack(
-            "<HhIH",
+            "<Hh",
             *[
                 self.measure_flags,
                 power & 0x7FFF,
-                wheel_rev & 0xFFFFFFFF,
-                (2 * time_in_ms) & 0xFFFF,
+                # wheel_rev & 0xFFFFFFFF,
+                # w_event_ms & 0xFFFF,
                 # crank_rev & 0xFFFF,
-                # time_in_ms & 0xFFFF,
+                # c_event_ms & 0xFFFF,
             ],
         )
         self.cp_measurement.changed(rate)
@@ -119,30 +152,57 @@ class CPService(Service):
 
     @characteristic(SENSOR_LOCATION_UUID, CharFlags.READ)
     def sensor_location(self, options):
-        return bytearray(b"\x0d")
+        return struct.pack("<B", *[SENSOR_LOCATION_REAR_WHEEL])
+
+    @characteristic(CP_CONTROL_POINT_UUID, CharFlags.WRITE | CharFlags.INDICATE)
+    def cp_control_point(self, options):
+        pass
 
 
 class CSCService(Service):
     def __init__(self):
         super().__init__(CSC_UUID, True)
         self.feature = (
-            CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT
-            # |  CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT
+            0
+            | CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT
+            | CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT
         )
 
     @characteristic(CSC_MEASUREMENT_UUID, CharFlags.NOTIFY | CharFlags.READ)
     def csc_measurement(self, options):
         pass
 
-    def notify_new_rate(self, wheel_rev, crank_rev, time_in_ms):
+    # @csc_measurement.descriptor("2902")
+    # def csc_measurement_descriptor(self, options):
+    #     return struct.pack("<H", *[0x0001])
+
+    def notify_all(self, wheel_rev, crank_rev, w_event_ms, c_event_ms):
+        rate = struct.pack(
+            "<BIHHH",
+            CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT
+            | CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT,
+            wheel_rev & 0xFFFFFFFF,
+            w_event_ms & 0xFFFF,
+            crank_rev & 0xFFFF,
+            c_event_ms & 0xFFFF,
+        )
+        self.csc_measurement.changed(rate)
+
+    def notify_crank(self, wheel_rev, crank_rev, w_event_ms, c_event_ms):
+        rate = struct.pack(
+            "<BHH",
+            CSC_F_BIT_CRANK_REVOLUTION_DATA_PRESENT,
+            crank_rev & 0xFFFF,
+            c_event_ms & 0xFFFF,
+        )
+        self.csc_measurement.changed(rate)
+
+    def notify_wheel(self, wheel_rev, crank_rev, w_event_ms, c_event_ms):
         rate = struct.pack(
             "<BIH",
-            # "<BHH",
-            self.feature,
+            CSC_F_BIT_WHEEL_REVOLUTION_DATA_PRESENT,
             wheel_rev & 0xFFFFFFFF,
-            time_in_ms & 0xFFFF,
-            # crank_rev & 0xFFFF,
-            # time_in_ms & 0xFFFF,
+            w_event_ms & 0xFFFF,
         )
         self.csc_measurement.changed(rate)
 
@@ -152,7 +212,11 @@ class CSCService(Service):
 
     @characteristic(SENSOR_LOCATION_UUID, CharFlags.READ)
     def sensor_location(self, options):
-        return bytearray(b"\x0d")
+        return struct.pack("<B", *[SENSOR_LOCATION_OTHER])
+
+    @characteristic(SC_CONTROL_POINT_UUID, CharFlags.WRITE | CharFlags.INDICATE)
+    def sc_control_point(self, options):
+        pass
 
 
 import time
@@ -165,7 +229,8 @@ async def main():
     csc_service = CSCService()
     cp_service = CPService()
     di_service = DeviceInformationService()
-    svcs = ServiceCollection([cp_service])
+    bat_service = BatteryService()
+    svcs = ServiceCollection([cp_service, csc_service, di_service, bat_service])
     await svcs.register(bus)
     # await csc_service.register(bus)
 
@@ -178,38 +243,89 @@ async def main():
     print(await adapter.get_address())
 
     # Start an advert that will last for 60 seconds.
-    advert = Advertisement("KeiserGAP2GATT CSC CP", [CP_UUID], 0x0480, 0)
+    advert = Advertisement(
+        localName="zzzzz",
+        serviceUUIDs=[CP_UUID, CSC_UUID, DI_UUID, BAT_UUID],
+        appearance=0x0480,
+        timeout=0,
+        includes=AdvertisingIncludes.TX_POWER,
+    )
     await advert.register(bus, adapter)
 
     import random
 
     last_t = time.time()
-    wheel_rev = 1
-    crank_rev = 1
-    rev = 0
-    interval = 0.1
+    wheel_rev_cls = ReverseRev()
+    crank_rev_cls = ReverseRev()
+    interval = 0.25
     while True:
         await asyncio.sleep(interval)
         this_t = time.time() - last_t
-        time_in_ms = int(this_t * 1024)
-        power = random.randint(120, 130)
+        power = random.randint(80, 100)
 
-        # rev += (60. + int(this_t) % 20) / 60 * interval
-        rev += interval
-        wheel_rev = int(rev)
-        crank_rev = int(rev)
-        print(rev, this_t, wheel_rev, crank_rev, time_in_ms)
-        csc_service.notify_new_rate(
-            wheel_rev=wheel_rev, crank_rev=crank_rev, time_in_ms=time_in_ms
-        )
+        rev = interval * 1.1
+        wheel_rev_cls.add(rev * 3, this_t)
+        crank_rev_cls.add(rev, this_t)
+
+        cr, cev = crank_rev_cls.get()
+        wr, wev = wheel_rev_cls.get()
+
+        print(wheel_rev_cls.get(), crank_rev_cls.get(), power)
+
+        if crank_rev_cls.notify or wheel_rev_cls.notify:
+            csc_service.notify_all(
+                wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
+            )
+        # else:
+        # if crank_rev_cls.notify:
+        # csc_service.notify_crank(
+        #     wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
+        # )
+        #     if wheel_rev_cls.notify:
+        # csc_service.notify_wheel(
+        #     wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
+        # )
         cp_service.notify_new_rate(
-            power=power, wheel_rev=wheel_rev, crank_rev=crank_rev, time_in_ms=time_in_ms
+            power=power,
+            wheel_rev=wr,
+            crank_rev=cr,
+            w_event_ms=wev,
+            c_event_ms=cev,
         )
-        # print("updated", rev, end="\r")
         # Handle dbus requests.
 
     await bus.wait_for_disconnect()
 
 
+class ReverseRev:
+    def __init__(self) -> None:
+        self.rev_float = 0
+        self.rev_event = 0
+        self.event_time_ms = 0
+        self.notify = False
+
+    def add(self, inc, now):
+        self.rev_float += inc
+
+        diff = self.rev_float - self.rev_event
+        if diff >= 1:
+            # print("diff", diff, self.event_time_ms)
+            self.event_time_ms = (
+                now * 1024
+                - (now * 1024 - self.event_time_ms) * (diff - int(diff)) / diff
+            )
+
+            self.rev_event = int(self.rev_float)
+            self.notify = True
+        else:
+            self.notify = False
+
+    def get(self):
+        return self.rev_event & 0xFFFF, int(self.event_time_ms) & 0xFFFF
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
