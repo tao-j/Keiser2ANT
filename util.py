@@ -4,3 +4,6 @@ def uint8(val):
 
 def uint16(val):
     return int(val) & 0xFFFF
+
+def uint32(val):
+    return int(val) & 0xFFFFFFFF

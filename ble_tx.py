@@ -256,11 +256,11 @@ class BLE_Tx:
     async def loop(self, bike_data):
         while True:
             await asyncio.sleep(0.25)
-            wr = bike_data.wr
-            cr = bike_data.cr
-            wev = bike_data.wev
-            cev = bike_data.cev
-            power = bike_data.power
+            wr = bike_data.get_wr()
+            cr = bike_data.get_cr()
+            wev = bike_data.get_wev()
+            cev = bike_data.get_cev()
+            power = bike_data.get_power()
             # if crank_rev_cls.notify and wheel_rev_cls.notify:
             if 1:
                 self.csc_service.notify_all(
