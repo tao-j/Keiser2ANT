@@ -261,6 +261,13 @@ class BLETx:
             wev = bike_data.get_wev()
             cev = bike_data.get_cev()
             power = bike_data.get_power()
+            print(
+                "BLE TX: ",
+                f"{power:3d} W {wr:6d} wREV {cr:6d} cREV",
+                f"w{wev:5d} ms c{cev:5d} ms {bike_data.speed * 3.6 / 1.67:2.1f} mph",
+                time.time(),
+                end="\n",
+            )
             # if crank_rev_cls.notify and wheel_rev_cls.notify:
             if 1:
                 self.csc_service.notify_all(

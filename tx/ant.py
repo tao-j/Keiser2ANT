@@ -6,7 +6,7 @@ import asyncio
 from ant.core import driver, node, message, constants, resetUSB
 
 
-class AntPlusTx:
+class ANTTx:
     def __init__(self):
         devs = usb.core.find(find_all=True, idVendor=0x0FCF)
         for dev in devs:
@@ -82,17 +82,16 @@ class AntPlusTx:
         self.node.send(ant_msg)
 
     async def loop(self, bike_data):
-        if True:
+        try:
             while True:
-                # await kl.new_data.wait()
                 await asyncio.sleep(0.25)
                 print(
-                    # f"Ver.{kl.version_minor}:"
+                    "ANT TX: ",
                     f"{int(bike_data.get_power()):3d} W {int(bike_data.get_cadence()):3d} RPM {bike_data.get_cum_rev_count():5d} REV "
-                    f"{bike_data.get_event_time_ms():5d} ms {bike_data.data_src.speed * 3.6 / 1.67:2.1f} mph",
+                    f"{bike_data.get_event_time_ms():5d} ms {bike_data.speed * 3.6 / 1.67:2.1f} mph",
+                    time.time(),
                     end="\n",
                 )
-
                 PWR_PAGE_ID = 0x10
                 payload = struct.pack(
                     "<BB" + "BB" + "HH",
@@ -138,8 +137,9 @@ class AntPlusTx:
                 # payload.append(0x00)  # flags not used
                 # ant_tx.send_f(payload)
 
-        # except asyncio.CancelledError:
-        #     print("Exiting: cancelled")
-        #     for chan in ant_tx.chans:
-        #         chan.close()
-        #     ant_tx.node.stop()
+        except asyncio.CancelledError:
+            print("Cancelled: Clean Up ANT+ Channels ....")
+            for chan in self.chans:
+                chan.close()
+            self.node.stop()
+            print("Exiting: Finished Cleanup.")

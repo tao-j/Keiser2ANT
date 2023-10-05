@@ -1,36 +1,20 @@
-import time, asyncio, random
+import asyncio, random
 
 from . import *
 
 
-class SimBike(Bike):
-    async def loop(self, debug=False):
-        init_t = time.time()
-        wheel_count = CountGenerator()
-        crank_count = CountGenerator()
-        interval = 0.25
+class SimCrankPowerEncoder(Bike):
+    def __init__(self) -> None:
+        super().__init__()
+
+        self.power = 0
+        self.rev_inc = 0
+
+    async def loop(self):
+        interval = 0.1
         while True:
             await asyncio.sleep(interval)
-            this_t = time.time() - init_t
-
-            rev = interval * 1.1
-            wheel_count.add(rev * 2, this_t)
-            crank_count.add(rev * 1, this_t)
+            self.rev_inc = interval * 1.1
             self.power = random.randint(120, 133)
-
-            self.cr, self.cev = crank_count.get()
-            self.wr, self.wev = wheel_count.get()
-            self.cadence = crank_count.rpm
-
-            # power events
-            self.power_event_counts += 1
-            self.cum_power += self.power
-
-            if debug:
-                print(
-                    wheel_count.get(),
-                    crank_count.get(),
-                    self.power,
-                    self.cadence,
-                    this_t,
-                )
+            self.new_data.set()
+            self.new_data.clear()
