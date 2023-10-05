@@ -1,11 +1,12 @@
 import asyncio
 import struct
-from bleak import BleakScanner
-from util import *
 import time
+from bleak import BleakScanner
+
+from . import *
 
 
-class KeiserBLEListener(DataSrc):
+class KeiserBike(Bike):
     def __init__(self, bike_id=0) -> None:
         super().__init__()
 

@@ -1,42 +1,3 @@
-def uint8(val):
-    return int(val) & 0xFF
-
-
-def uint16(val):
-    return int(val) & 0xFFFF
-
-
-def uint32(val):
-    return int(val) & 0xFFFFFFFF
-
-
-def power_to_speed(power):
-    """
-    power in watts
-    speed in m/s
-    """
-    Cd = 0.9
-    A = 0.5
-    rho = 1.225
-    Crr = 0.0045
-    F_gravity = 75 * 9.81
-
-    # Define the power equations
-    coeff_P_drag = 0.5 * Cd * A * rho  # * v**3
-    coeff_P_roll = Crr * F_gravity  # * v
-
-    # P_drag v^3 + P_roll v + (-power) = 0
-    p = coeff_P_roll / coeff_P_drag
-    q = -power / coeff_P_drag
-
-    delta = p**3 / 27 + q**2 / 4
-    cubic_root = lambda x: x ** (1.0 / 3) if x > 0 else -((-x) ** (1.0 / 3))
-    u = cubic_root(-q / 2 + delta ** (1.0 / 2))
-    v = cubic_root(-q / 2 - delta ** (1.0 / 2))
-
-    return u + v
-
-
 class CountGenerator:
     """Generates discrete count data and closest event time from continuous value
 
@@ -76,7 +37,7 @@ class CountGenerator:
         #     self.notify = False
 
 
-class DataSrc:
+class Bike:
     def __init__(self) -> None:
         self.cr = 0
         self.cev = 0
@@ -88,3 +49,30 @@ class DataSrc:
         self.power_event_counts = 0
         self.cum_power = 0
         self.speed = 0
+
+
+def power_to_speed(power):
+    """
+    power in watts
+    speed in m/s
+    """
+    Cd = 0.9
+    A = 0.5
+    rho = 1.225
+    Crr = 0.0045
+    F_gravity = 75 * 9.81
+
+    # Define the power equations
+    coeff_P_drag = 0.5 * Cd * A * rho  # * v**3
+    coeff_P_roll = Crr * F_gravity  # * v
+
+    # P_drag v^3 + P_roll v + (-power) = 0
+    p = coeff_P_roll / coeff_P_drag
+    q = -power / coeff_P_drag
+
+    delta = p**3 / 27 + q**2 / 4
+    cubic_root = lambda x: x ** (1.0 / 3) if x > 0 else -((-x) ** (1.0 / 3))
+    u = cubic_root(-q / 2 + delta ** (1.0 / 2))
+    v = cubic_root(-q / 2 - delta ** (1.0 / 2))
+
+    return u + v

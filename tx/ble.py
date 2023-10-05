@@ -216,7 +216,7 @@ class CSCService(Service):
         pass
 
 
-class BLE_Tx:
+class BLETx:
     def __init__(self) -> None:
         pass
 
