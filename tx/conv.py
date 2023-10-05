@@ -1,6 +1,6 @@
 import time
 from . import *
-from ..bike import Bike
+from bike import Bike
 
 
 def uint8(val):

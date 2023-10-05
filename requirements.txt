@@ -1,0 +1,4 @@
+pyusb
+bleak
+python-ant
+bluez-peripheral
