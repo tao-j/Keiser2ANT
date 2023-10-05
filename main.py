@@ -1,4 +1,7 @@
-from typing import Union
+import asyncio
+import struct
+import time
+
 from bluez_peripheral.gatt.service import Service, ServiceCollection
 from bluez_peripheral.gatt.characteristic import (
     characteristic,
@@ -7,12 +10,6 @@ from bluez_peripheral.gatt.characteristic import (
 from bluez_peripheral.util import *
 from bluez_peripheral.advert import Advertisement, AdvertisingIncludes
 from bluez_peripheral.agent import NoIoAgent
-import asyncio
-
-import struct
-
-from bluez_peripheral.util import Collection
-from bluez_peripheral.uuid import BTUUID as UUID
 
 # cycling speed and cadence
 CSC_UUID = "1816"
@@ -219,24 +216,20 @@ class CSCService(Service):
         pass
 
 
-import time
-
-
 async def main():
     # system busmfrom dbus_next.
     bus = await get_message_bus()
 
-    csc_service = CSCService()
-    cp_service = CPService()
-    di_service = DeviceInformationService()
     bat_service = BatteryService()
-    svcs = ServiceCollection([cp_service, csc_service, di_service, bat_service])
+    di_service = DeviceInformationService()
+    cp_service = CPService()
+    csc_service = CSCService()
+    svcs = ServiceCollection([bat_service, di_service, cp_service, csc_service])
     await svcs.register(bus)
-    # await csc_service.register(bus)
 
     # An agent is required to handle pairing
+    # This script may need superuser for this to work.
     agent = NoIoAgent()
-    # This script needs superuser for this to work.
     await agent.register(bus)
 
     adapter = await Adapter.get_first(bus)
@@ -244,8 +237,8 @@ async def main():
 
     # Start an advert that will last for 60 seconds.
     advert = Advertisement(
-        localName="zzzzz",
-        serviceUUIDs=[CP_UUID, CSC_UUID, DI_UUID, BAT_UUID],
+        localName="Keiser M to GATT",
+        serviceUUIDs=[BAT_UUID, DI_UUID, CP_UUID, CSC_UUID],
         appearance=0x0480,
         timeout=0,
         includes=AdvertisingIncludes.TX_POWER,
@@ -261,30 +254,32 @@ async def main():
     while True:
         await asyncio.sleep(interval)
         this_t = time.time() - last_t
-        power = random.randint(80, 100)
+        power = random.randint(120, 133)
 
         rev = interval * 1.1
-        wheel_rev_cls.add(rev * 3, this_t)
-        crank_rev_cls.add(rev, this_t)
+        wheel_rev_cls.add(rev * 8, this_t)
+        crank_rev_cls.add(rev * 4, this_t)
 
         cr, cev = crank_rev_cls.get()
         wr, wev = wheel_rev_cls.get()
 
         print(wheel_rev_cls.get(), crank_rev_cls.get(), power)
 
-        if crank_rev_cls.notify or wheel_rev_cls.notify:
+        if crank_rev_cls.notify and wheel_rev_cls.notify:
             csc_service.notify_all(
                 wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
             )
+            crank_rev_cls.notify = False
+            wheel_rev_cls.notify = False
         # else:
-        # if crank_rev_cls.notify:
-        # csc_service.notify_crank(
-        #     wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
-        # )
+        #     if crank_rev_cls.notify:
+        #         csc_service.notify_crank(
+        #             wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
+        #         )
         #     if wheel_rev_cls.notify:
-        # csc_service.notify_wheel(
-        #     wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
-        # )
+        #         csc_service.notify_wheel(
+        #             wheel_rev=wr, crank_rev=cr, w_event_ms=wev, c_event_ms=cev
+        #         )
         cp_service.notify_new_rate(
             power=power,
             wheel_rev=wr,
@@ -317,8 +312,8 @@ class ReverseRev:
 
             self.rev_event = int(self.rev_float)
             self.notify = True
-        else:
-            self.notify = False
+        # else:
+        #     self.notify = False
 
     def get(self):
         return self.rev_event & 0xFFFF, int(self.event_time_ms) & 0xFFFF
