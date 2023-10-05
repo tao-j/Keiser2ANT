@@ -1,6 +1,7 @@
 import usb
 import struct
 import time
+import asyncio
 
 from ant.core import driver, node, message, constants, resetUSB
 
@@ -80,20 +81,16 @@ class AntPlusTx:
         ant_msg = message.ChannelBroadcastDataMessage(chan.number, data=payload)
         self.node.send(ant_msg)
 
-    async def loop(self, kl, pd):
+    async def loop(self, bike_data):
         if True:
             while True:
-                await kl.new_data.wait()
-                # await asyncio.sleep(0.25)
-                # kl.power = 11
-                # kl.cadence = 222
-                pd.feed(kl.power, kl.cadence)
-                kl.new_data.clear()
+                # await kl.new_data.wait()
+                await asyncio.sleep(0.25)
                 print(
-                    f"Ver.{kl.version_minor}:"
-                    f"{int(pd.power):3d} W {int(pd.cadence):3d} RPM {pd.cum_rev_count:5d} REV "
-                    f"{pd.get_event_time_ms():5d} ms {pd.speed * 3.6 / 1.67:2.1f} mph",
-                    end="\r",
+                    # f"Ver.{kl.version_minor}:"
+                    f"{int(bike_data.get_power()):3d} W {int(bike_data.get_cadence()):3d} RPM {bike_data.get_cum_rev_count():5d} REV "
+                    f"{bike_data.get_event_time_ms():5d} ms {bike_data.data_src.speed * 3.6 / 1.67:2.1f} mph",
+                    end="\n",
                 )
 
                 PWR_PAGE_ID = 0x10
@@ -101,11 +98,11 @@ class AntPlusTx:
                     "<BB" + "BB" + "HH",
                     *[
                         PWR_PAGE_ID,
-                        pd.get_event_count(),
+                        bike_data.get_event_count(),
                         0xFF,  # Pedal power not used
-                        pd.get_cadence(),
-                        pd.get_cum_power(),
-                        pd.get_power(),
+                        bike_data.get_cadence(),
+                        bike_data.get_cum_power(),
+                        bike_data.get_power(),
                     ],
                 )
                 self.send_msg(self.p_chan, payload)
@@ -116,8 +113,8 @@ class AntPlusTx:
                     DEFAULT_PAGE_ID,
                     0xFF,
                     0xFFFF,
-                    pd.get_event_time_ms(),
-                    pd.get_cum_rev_count(),
+                    bike_data.get_event_time_ms(),
+                    bike_data.get_cum_rev_count(),
                 )
                 self.send_msg(self.c_chan, payload)
 
@@ -132,12 +129,12 @@ class AntPlusTx:
                 # ant_tx.send_f(payload)
 
                 # payload = bytearray(b"\x19")  # FE power
-                # payload.append(pd.power_event_counts & 0xFF)
-                # payload.append(int(pd.cadence) & 0xFF)  # Cadence
-                # payload.append(pd.cum_power & 0xFF)
-                # payload.append(pd.cum_power >> 8)
-                # payload.append(pd.power & 0xFF)
-                # payload.append((pd.power >> 8) & 0x0F)
+                # payload.append(bike_data.power_event_counts & 0xFF)
+                # payload.append(int(bike_data.cadence) & 0xFF)  # Cadence
+                # payload.append(bike_data.cum_power & 0xFF)
+                # payload.append(bike_data.cum_power >> 8)
+                # payload.append(bike_data.power & 0xFF)
+                # payload.append((bike_data.power >> 8) & 0x0F)
                 # payload.append(0x00)  # flags not used
                 # ant_tx.send_f(payload)
 

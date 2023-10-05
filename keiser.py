@@ -1,10 +1,14 @@
 import asyncio
 import struct
 from bleak import BleakScanner
+from util import *
+import time
 
 
-class KeiserBLEListener:
-    def __init__(self, bike_id=4) -> None:
+class KeiserBLEListener(DataSrc):
+    def __init__(self, bike_id=0) -> None:
+        super().__init__()
+
         self.bike_id = bike_id & 0xFF
         self.version_major = 0
         self.version_minor = 0
@@ -23,6 +27,9 @@ class KeiserBLEListener:
         self.new_data = asyncio.Event()
         self.new_data.clear()
         self.scanner = BleakScanner(self.callback)
+
+        self.last_feed_time = time.time()
+        self.speed = 0
 
     def callback(self, device, advertisement_data):
         if device.name == "M3":
@@ -74,16 +81,37 @@ class KeiserBLEListener:
                     return True
         return False
 
-    def start(self):
-        asyncio.run(self.loop())
-
     async def loop(self):
-        print("staring scanning loop")
+        # print("staring scanning loop")
+        wheel_count = CountGenerator()
+        crank_count = CountGenerator()
         while True:
             await self.scanner.start()
             try:
                 async with asyncio.timeout(10):
                     await self.scan_request.wait()
+
+                    now = time.time()
+                    dt = now - self.last_feed_time
+                    self.last_feed_time = now
+
+                    # speed events
+                    speed = power_to_speed(self.power)
+                    # set wheel to 700c*25 or ~2096mm
+                    WHEEL_CIRCUMFERENCE = 2.096
+                    inc = (speed + self.speed) / 2 * dt / WHEEL_CIRCUMFERENCE
+                    self.speed = speed
+                    wheel_count.add(inc, now)
+
+                    crank_count.add(self.cadence * dt / 60, now)
+
+                    self.cr, self.cev = crank_count.get()
+                    self.wr, self.wev = wheel_count.get()
+
+                    # power events
+                    self.power_event_counts += 1
+                    self.cum_power += self.power
+
             except asyncio.TimeoutError:
                 print("Scan timeout, restarting\r", end="")
             await self.scanner.stop()
