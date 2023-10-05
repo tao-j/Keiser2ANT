@@ -1,8 +1,10 @@
 import asyncio
-from keiser import KeiserBLEListener
+import sys
 import time
+
 from util import *
 from ant_tx import AntPlusTx
+from keiser import KeiserBLEListener
 
 
 class BikeDataByIntegration:
@@ -118,8 +120,6 @@ async def main(bike_id: int):
 
 
 if __name__ == "__main__":
-    import sys
-
     if len(sys.argv) == 2:
         bike_id = int(sys.argv[1])
     else:
