@@ -34,7 +34,7 @@ class KeiserBike(Bike):
 
     def parse_keiser_msd(self, msd: dict):
         for k, v in msd.items():
-            if k == 0x0102 and 17 == len(v) and v[3] == self.bike_id:
+            if k == 0x0102 and 17 == len(v) and v[3] == self.bike_id and v[2] == 0:
                 (
                     self.version_major,
                     self.version_minor,
@@ -49,6 +49,7 @@ class KeiserBike(Bike):
                     self.distance,
                     self.gear,
                 ) = struct.unpack("<BBB" + "BHHH" + "HBBHB", v)
+
                 self.cadence /= 10
                 self.heart_rate /= 10
                 if self.distance >> 15 == 0:
@@ -69,18 +70,19 @@ class KeiserBike(Bike):
                 # print(f"Duration Seconds: {seconds}")
                 # print(f"Distance: {distance}")
                 # print(f"Gear: {gear}")
-                if self.data_type == 0:
-                    return True
+
+                return True
         return False
 
     async def loop(self):
         while True:
             await self.scanner.start()
             try:
-                async with asyncio.timeout(10):
+                async with asyncio.timeout(2):
                     await self.new_data.wait()
-
+                    self.no_data = False
             except asyncio.TimeoutError:
                 print("Scan timeout, restarting\r", end="")
+                self.no_data = True
             await self.scanner.stop()
             self.new_data.clear()
