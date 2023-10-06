@@ -256,6 +256,10 @@ class BLETx:
     async def loop(self, bike_data):
         while True:
             await asyncio.sleep(0.25)
+            if bike_data.no_data:
+                print("BLE: No data")
+                continue
+
             wr = bike_data.get_wr()
             cr = bike_data.get_cr()
             wev = bike_data.get_wev()

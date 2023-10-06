@@ -1,6 +1,7 @@
 import time
 from . import *
 from bike import Bike
+import asyncio
 
 
 def uint8(val):
@@ -38,12 +39,21 @@ class Conv:
         self.power_event_counts = 0
         self.cum_power = 0
 
+        self.no_data = True
+
     async def loop(self):
         wheel_count = CountGenerator()
         crank_count = CountGenerator()
 
         while True:
-            await self.data_src.new_data.wait()
+            # await self.data_src.new_data.wait()
+            await asyncio.sleep(0.05)
+
+            if self.data_src.no_data:
+                self.no_data = True
+                continue
+            else:
+                self.no_data = False
 
             now = time.time()
             dt = now - self.last_feed_time
@@ -55,6 +65,7 @@ class Conv:
                 crank_count.add(inc, now)
                 self.cadence = crank_count.rpm
             else:
+                self.cadence = self.data_src.cadence
                 crank_count.add(self.cadence * dt / 60, now)
 
             if self.flag_power_to_speed:

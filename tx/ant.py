@@ -85,6 +85,9 @@ class ANTTx:
         try:
             while True:
                 await asyncio.sleep(0.25)
+                if bike_data.no_data:
+                    print("ANT: No data")
+                    continue
                 print(
                     "ANT TX: ",
                     f"{int(bike_data.get_power()):3d} W {int(bike_data.get_cadence()):3d} RPM {bike_data.get_cum_rev_count():5d} REV "
