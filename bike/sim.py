@@ -14,6 +14,7 @@ class SimCrankPowerEncoder(Bike):
         interval = 0.1
         while True:
             await asyncio.sleep(interval)
+            self.no_data = False
             self.rev_inc = interval * 1.1
             self.power = random.randint(120, 133)
             self.new_data.set()
