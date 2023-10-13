@@ -1,4 +1,4 @@
 pyusb
 bleak
-python-ant
+ant @ git+https://github.com/mch/python-ant@master
 bluez-peripheral
