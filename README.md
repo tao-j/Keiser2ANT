@@ -1,7 +1,74 @@
-# Bike Data Hub
+# OpenFitness Data Adapter
 
-This project is very similar to [ptx2/gymnasticon](https://github.com/ptx2/gymnasticon). Instead of JavaScript, it is written in Python. 
-It adds BikeID selection for Keiser and adds speed page for ANT transmission.
+A bridge to connect fitness equipment with sports watches and apps, providing advanced workout metrics beyond basic heart rate data.
+
+For example, you can:
+- Get cadence and power data from spinning bikes
+- Get speed and incline data from treadmills
+- And more!
+
+## Features
+- Small formfactor device with internal chargable battery lasting long. 128x64 dots OLED display, buttons for operation.
+- Connect to various fitness equipment (spinning bikes, treadmills, steppers, etc.)
+- Receive proprietary BLE messages from equipment using non-standard protocols
+- Receive data from ANT+ protocol devices
+- Transmit data in standardized BLE formats supported by modern sports watches (Apple Watch, Garmin, etc.) and apps
+- Transmit data in ANT+ protocol to support Garmin and other ANT+ devices
+
+# Current Implementation and Similar Solutions (Linux required)
+
+[ptx2/gymnasticon](https://github.com/ptx2/gymnasticon) was an earlier project implementing similar functionality, which appears to have been adapted by [k2pi](https://k2pi.company.site/) for their $80-100 commercial product. However, their solution has limited features and is relatively bulky with higher power consumption.
+
+Due to the original JavaScript project's large codebase and unmaintained BLE stack, we've developed this Python-based implementation for better maintainability and extensibility. Our solution adds Keiser bike ID selection and ANT+ speed data transmission.
+
+The current implementation runs on Linux systems using a USB dongle for ANT+ signal transmission, successfully interfacing with both Garmin devices (via ANT+) and Apple Watch (via BLE).
+
+# Hardware Implementation Options
+## MCU Selection Analysis
+
+### Option 1: nRF52840
+The nRF52840 offers integrated ANT+ and BLE capabilities, making it a strong candidate for this project. Key considerations:
+- Requires $1600 one-time license fee and regulatory approval for ANT+ stack
+- Development-friendly options available through Adafruit:
+  - [nRF52840 board](https://www.adafruit.com/product/4062)
+  - [OLED display](https://www.adafruit.com/product/4650)
+  - [Battery management](https://www.adafruit.com/product/3898)
+
+Potential licensing workaround:
+- Distribute base firmware with BLE only
+- Provide optional ANT+ stack firmware update for evaluation purposes
+- Note: This approach may have legal implications
+
+### Option 2: nRF52832 (ANT D52 Module)
+A cost-effective solution with pre-certified components:
+- D52 BOM cost: ~$10
+- No license fees
+- Pre-approved regulatory certification
+- Requires Garmin distribution agreement (free)
+- Reference: [D52 Module](https://www.arrow.com/en/products/d52md2m8ia-tray/dynastream-innovations)
+
+Limitations:
+- No pre-made breakout boards available
+- Manual assembly required
+- SoftDevice S332 required for combined BLE/ANT+ functionality, and using Nordic nRF52 SDK is very painful.
+
+### Option 3: nRF24AP2 + ESP32-S3
+A modular approach combining separate chips:
+- nRF24AP2 (~$5): ANT+ capabilities
+  - No license fees
+  - NRND status may affect availability
+  - Serial interface simplifies integration
+- ESP32-S3 (~$5): Main processor
+  - Provides BLE and WiFi connectivity
+  - Handles core processing tasks
+
+Considerations:
+- Requires careful antenna design
+- Total solution cost competitive with other options
+- More complex PCB design but simpler software stack
+
+# Design notes for the proof of concept
+
 In addition, the developer strives to deliver a well-thought design for logically sensible modules and developer friendly concepts as a thought exercise.
 
 Originally this project is hosted under two separately projects [Keiser2GATT](https://github.com/tao-j/Keiser2GATT) and [Keiser2ANT](https://github.com/tao-j/Keiser2ANT) that are in succession of [Keiser2Garmin](https://github.com/tao-j/Keiser2Garmin).
@@ -50,7 +117,7 @@ ANT+ specs can be obtained by simply register [here](https://www.thisisant.com/m
 #### Hardware requirement
 + An ANT+ transceiver
     + `ANT-USB`
-    + `ANT-USBm` (based on NRF 24L01P)
+    + `ANT-USBm` (based on nRF24L01P?)
     + Or other ones supports Ant+ Tx (needs simple code change to add raw serial)
 
 It is believed that CYCPLUS branded ones do not work.
@@ -80,10 +147,3 @@ The Bluetooth SIG pdf specs are not that helpful. But xml files circulating over
 https://github.com/oesmith/gatt-xml/blob/master/org.bluetooth.characteristic.cycling_power_measurement.xml). 
 + The cross-platform solution `bless` has trouble advertising several GATT profiles on Linux. If two profiles are defined, only one profile can be read by nRF connect. In light of this, `bluez-peripheral` is used.
 + [1](https://ihaque.org/posts/2021/01/04/pelomon-part-iv-software/) [2](https://github.com/olympum/ble-cycling-power) [3](https://teaandtechtime.com/arduino-ble-cycling-power-service). [4](https://github.com/PunchThrough/espresso-ble/blob/master/ble.py) [5](https://github.com/Jumperr-labs/python-gatt-server/blob/master/gatt_server.py)
-
-
-
-## Alternate Solutions on MCU
-To do it another way, BLE only, actually in Circuit Python can be used, which does not support generic Linux host at the moment. `ESP32-S3` or old `ESP32` or others can be used.
-
-In order to transmit the ANT+ signals other than a fully fledged system, `nRF52840` might be a good choice, but its soft device licensing can be troublesome.
